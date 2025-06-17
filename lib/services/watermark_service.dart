@@ -8,7 +8,7 @@ class WatermarkService {
   WatermarkService._internal();
 
   bool _isEnabled = true;
-  String _username = 'User';
+  String _username = 'Watermark++Studio';
   double _opacity = 0.7;
   Color _textColor = Colors.white;
   double _fontSize = 14.0;
