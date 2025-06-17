@@ -14,7 +14,7 @@ class ScreenshotService {
   bool _detectionEnabled = true;
   bool _pauseOnScreenshot = true;
   bool _showWarningDialog = true;
-  bool _preventScreenshots = true;
+  bool _preventScreenshots = true; // Re-enable secure overlay
 
   List<ScreenshotAttempt> _attempts = [];
   int _totalAttempts = 0;
@@ -34,12 +34,38 @@ class ScreenshotService {
   Stream<ScreenshotEvent> get screenshotStream => _screenshotController.stream;
 
   Future<void> initialize() async {
+    print('ScreenshotService: Initializing');
     await _loadSettings();
     await _setupPlatformChannel();
     await _loadAttemptHistory();
 
     if (_detectionEnabled) {
       await startMonitoring();
+    }
+
+    if (_preventScreenshots && Platform.isIOS) {
+      await enableSecureOverlay();
+    }
+    print('ScreenshotService: Initialization completed');
+  }
+
+  Future<void> enableSecureOverlay() async {
+    try {
+      print('ScreenshotService: Enabling secure overlay');
+      await _channel.invokeMethod('enableSecureOverlay');
+      print('ScreenshotService: Secure overlay enabled');
+    } catch (e) {
+      print('ScreenshotService: Error enabling secure overlay: $e');
+    }
+  }
+
+  Future<void> disableSecureOverlay() async {
+    try {
+      print('ScreenshotService: Disabling secure overlay');
+      await _channel.invokeMethod('disableSecureOverlay');
+      print('ScreenshotService: Secure overlay disabled');
+    } catch (e) {
+      print('ScreenshotService: Error disabling secure overlay: $e');
     }
   }
 
@@ -51,8 +77,9 @@ class ScreenshotService {
       _showWarningDialog = prefs.getBool('screenshot_warning_enabled') ?? true;
       _preventScreenshots = prefs.getBool('screenshot_prevent_enabled') ?? true;
       _totalAttempts = prefs.getInt('screenshot_total_attempts') ?? 0;
+      print('ScreenshotService: Settings loaded');
     } catch (e) {
-      print('Error loading screenshot settings: $e');
+      print('ScreenshotService: Error loading settings: $e');
     }
   }
 
@@ -62,11 +89,11 @@ class ScreenshotService {
       final attemptsJson = _attempts.map((attempt) {
         return '${attempt.timestamp.toIso8601String()}|${attempt.videoFile}|${attempt.position}';
       }).toList();
-
       await prefs.setStringList('screenshot_attempts', attemptsJson);
       await prefs.setInt('screenshot_total_attempts', _totalAttempts);
+      print('ScreenshotService: Attempt history saved');
     } catch (e) {
-      print('Error saving screenshot attempt history: $e');
+      print('ScreenshotService: Error saving attempt history: $e');
     }
   }
 
@@ -90,8 +117,9 @@ class ScreenshotService {
           );
         }
       }).toList();
+      print('ScreenshotService: Attempt history loaded');
     } catch (e) {
-      print('Error loading screenshot attempt history: $e');
+      print('ScreenshotService: Error loading attempt history: $e');
       _attempts = [];
     }
   }
@@ -99,8 +127,9 @@ class ScreenshotService {
   Future<void> _setupPlatformChannel() async {
     try {
       _channel.setMethodCallHandler(_handleMethodCall);
+      print('ScreenshotService: Platform channel set up');
     } catch (e) {
-      print('Error setting up platform channel: $e');
+      print('ScreenshotService: Error setting up platform channel: $e');
     }
   }
 
@@ -110,7 +139,7 @@ class ScreenshotService {
         await _handleScreenshotDetected();
         break;
       default:
-        print('Unknown method call: ${call.method}');
+        print('ScreenshotService: Unknown method call: ${call.method}');
     }
   }
 
@@ -118,17 +147,19 @@ class ScreenshotService {
     try {
       if (_detectionEnabled) {
         await _channel.invokeMethod('startDetection');
+        print('ScreenshotService: Monitoring started');
       }
     } catch (e) {
-      print('Error starting screenshot detection: $e');
+      print('ScreenshotService: Error starting monitoring: $e');
     }
   }
 
   Future<void> stopMonitoring() async {
     try {
       await _channel.invokeMethod('stopDetection');
+      print('ScreenshotService: Monitoring stopped');
     } catch (e) {
-      print('Error stopping screenshot detection: $e');
+      print('ScreenshotService: Error stopping monitoring: $e');
     }
   }
 
@@ -155,14 +186,12 @@ class ScreenshotService {
       _screenshotController.add(event);
     }
 
-    if (Platform.isIOS && _preventScreenshots && _onObstructScreen != null) {
-      _onObstructScreen!();
-    }
-
     if (_onScreenshotDetected != null) {
       _onScreenshotDetected!();
     }
-    print('Screenshot detected and logged: ${attempt.timestamp}');
+    print(
+      'ScreenshotService: Screenshot detected and logged: ${attempt.timestamp}',
+    );
   }
 
   void setOnScreenshotDetected(Function callback) {
@@ -205,9 +234,17 @@ class ScreenshotService {
       if (preventScreenshots != null) {
         _preventScreenshots = preventScreenshots;
         await prefs.setBool('screenshot_prevent_enabled', preventScreenshots);
+        if (Platform.isIOS) {
+          if (_preventScreenshots) {
+            await enableSecureOverlay();
+          } else {
+            await disableSecureOverlay();
+          }
+        }
       }
+      print('ScreenshotService: Settings updated');
     } catch (e) {
-      print('Error updating screenshot settings: $e');
+      print('ScreenshotService: Error updating settings: $e');
     }
   }
 
@@ -243,8 +280,9 @@ class ScreenshotService {
       final prefs = await SharedPreferences.getInstance();
       await prefs.remove('screenshot_attempts');
       await prefs.setInt('screenshot_total_attempts', 0);
+      print('ScreenshotService: History cleared');
     } catch (e) {
-      print('Error clearing screenshot history: $e');
+      print('ScreenshotService: Error clearing history: $e');
     }
   }
 
@@ -268,25 +306,110 @@ class ScreenshotService {
       context: context,
       barrierDismissible: false,
       builder: (BuildContext context) {
-        return AlertDialog(
-          icon: const Icon(Icons.security, color: Colors.red, size: 48),
-          title: const Text(
-            'Screenshot Blocked',
-            style: TextStyle(fontWeight: FontWeight.bold, color: Colors.red),
-          ),
-          content: const Text(
-            'Screenshots are blocked while watching this video for security reasons.',
-            textAlign: TextAlign.center,
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(),
-              child: const Text('I Understand'),
+        return Dialog(
+          backgroundColor: Colors.transparent,
+          elevation: 0,
+          child: Container(
+            padding: const EdgeInsets.all(24),
+            decoration: BoxDecoration(
+              color: Theme.of(context).brightness == Brightness.dark
+                  ? const Color(0xFF1C1C1E).withOpacity(0.95)
+                  : Colors.white.withOpacity(0.95),
+              borderRadius: BorderRadius.circular(20),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.3),
+                  blurRadius: 30,
+                  offset: const Offset(0, 10),
+                ),
+              ],
             ),
-          ],
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 80,
+                  height: 80,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFFF3B30).withOpacity(0.1),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(
+                    Icons.shield_outlined,
+                    color: Color(0xFFFF3B30),
+                    size: 40,
+                  ),
+                ),
+                const SizedBox(height: 20),
+                Text(
+                  'Content Protected',
+                  style: TextStyle(
+                    fontSize: 22,
+                    fontWeight: FontWeight.w600,
+                    color: Theme.of(context).brightness == Brightness.dark
+                        ? Colors.white
+                        : const Color(0xFF1D1D1F),
+                    letterSpacing: -0.5,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  'This content is protected from screenshots and screen recording to maintain privacy and security.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontSize: 16,
+                    color: Theme.of(context).brightness == Brightness.dark
+                        ? const Color(0xFF8E8E93)
+                        : const Color(0xFF6D6D70),
+                    height: 1.4,
+                    letterSpacing: -0.2,
+                  ),
+                ),
+                const SizedBox(height: 32),
+                Container(
+                  width: double.infinity,
+                  height: 50,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF007AFF),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Material(
+                    color: Colors.transparent,
+                    child: InkWell(
+                      borderRadius: BorderRadius.circular(12),
+                      onTap: () => Navigator.of(context).pop(),
+                      child: const Center(
+                        child: Text(
+                          'I Understand',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 17,
+                            fontWeight: FontWeight.w600,
+                            letterSpacing: -0.3,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
         );
       },
     );
+  }
+
+  Future<void> dispose() async {
+    print('ScreenshotService: Disposing');
+    await stopMonitoring();
+    if (Platform.isIOS) {
+      await disableSecureOverlay();
+    }
+    if (!_screenshotController.isClosed) {
+      _screenshotController.close();
+    }
+    print('ScreenshotService: Dispose completed');
   }
 }
 

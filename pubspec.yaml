@@ -11,16 +11,17 @@ dependencies:
   flutter:
     sdk: flutter
    # Video playback
-  video_player: ^2.8.1
+  video_player: ^2.10.0
   
   # File handling and permissions
   file_picker: ^10.2.0
   permission_handler: ^11.1.0
-  path_provider: ^2.1.1
+  path_provider: ^2.1.4
   video_thumbnail: ^0.5.3
   image_picker: ^1.1.2
   flutter_windowmanager: ^0.2.0
 
+  chewie: ^1.8.3
   
   # Storage and preferences
   shared_preferences: ^2.2.2
@@ -35,3 +36,6 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+  
+  assets:
+    - assets/videos/test_video.mp4

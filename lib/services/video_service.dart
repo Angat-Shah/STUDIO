@@ -1,3 +1,5 @@
+import 'package:chewie/chewie.dart';
+import 'package:flutter/material.dart';
 import 'package:video_player/video_player.dart';
 import 'dart:io';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -7,40 +9,36 @@ class VideoService {
   factory VideoService() => _instance;
   VideoService._internal();
 
-  // Video player controller management
-  VideoPlayerController? _currentController;
-
-  // Playback restrictions
+  ChewieController? _chewieController;
+  VideoPlayerController? _videoPlayerController;
   bool _restrictionsEnabled = true;
   double _maxPlaybackSpeed = 2.0;
   int _maxRewindSeconds = 10;
-
-  // Error handling
   String? _lastError;
-
-  // Initialization status
   bool _isInitialized = false;
 
-  // Getters
-  VideoPlayerController? get currentController => _currentController;
+  ChewieController? get chewieController => _chewieController;
+  VideoPlayerController? get currentController => _videoPlayerController;
   bool get isInitialized => _isInitialized;
   String? get lastError => _lastError;
   bool get restrictionsEnabled => _restrictionsEnabled;
   double get maxPlaybackSpeed => _maxPlaybackSpeed;
   int get maxRewindSeconds => _maxRewindSeconds;
 
-  /// Initialize video service with settings
   Future<void> initialize() async {
-    try {
-      await _loadSettings();
-      _isInitialized = true;
-    } catch (e) {
-      _lastError = 'Failed to initialize video service: ${e.toString()}';
-      _isInitialized = false;
+    if (!_isInitialized) {
+      try {
+        await _loadSettings();
+        _isInitialized = true;
+        print('VideoService: Initialized successfully');
+      } catch (e) {
+        _lastError = 'Failed to initialize video service: ${e.toString()}';
+        _isInitialized = false;
+        print('VideoService: Initialization failed: $e');
+      }
     }
   }
 
-  /// Load playback settings from SharedPreferences
   Future<void> _loadSettings() async {
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -48,221 +46,228 @@ class VideoService {
           prefs.getBool('playback_restrictions_enabled') ?? true;
       _maxPlaybackSpeed = prefs.getDouble('max_playback_speed') ?? 2.0;
       _maxRewindSeconds = prefs.getInt('max_rewind_seconds') ?? 10;
+      print('VideoService: Settings loaded');
     } catch (e) {
       _lastError = 'Failed to load settings: ${e.toString()}';
+      print('VideoService: Failed to load settings: $e');
     }
   }
 
-  /// Create and initialize video player controller
-  Future<VideoPlayerController?> createController(File videoFile) async {
+  Future<ChewieController?> createController(File videoFile) async {
     try {
-      // Dispose previous controller if exists
-      await disposeController();
-
-      // Validate video file
+      print('VideoService: Creating controller for file: ${videoFile.path}');
+      await disposeController(); // Ensure previous controller is disposed
       if (!videoFile.existsSync()) {
         throw Exception('Video file does not exist');
       }
-
-      // Check file size (limit to 2GB for safety)
       int fileSize = await videoFile.length();
       if (fileSize > 2 * 1024 * 1024 * 1024) {
         throw Exception('Video file too large (max 2GB)');
       }
 
-      // Create controller
-      _currentController = VideoPlayerController.file(videoFile);
-
-      // Initialize controller
-      await _currentController!.initialize();
-
-      // Verify video properties
-      if (!_currentController!.value.isInitialized) {
+      _videoPlayerController = VideoPlayerController.file(videoFile);
+      await _videoPlayerController!.initialize();
+      if (!_videoPlayerController!.value.isInitialized) {
         throw Exception('Failed to initialize video player');
       }
 
-      // Check video resolution support (max 1080p)
-      final size = _currentController!.value.size;
+      _chewieController = ChewieController(
+        videoPlayerController: _videoPlayerController!,
+        autoInitialize: true,
+        autoPlay: false,
+        looping: false,
+        allowMuting: true,
+        allowedScreenSleep: false,
+        errorBuilder: (context, errorMessage) {
+          return Center(
+            child: Text(
+              'Error playing video: $errorMessage',
+              style: TextStyle(color: Colors.white),
+            ),
+          );
+        },
+      );
+
+      final size = _videoPlayerController!.value.size;
       if (size.width > 1920 || size.height > 1080) {
         print(
-          'Warning: Video resolution ${size.width}x${size.height} may not perform optimally',
+          'VideoService: Warning: Video resolution ${size.width}x${size.height} may not perform optimally',
         );
       }
-
       _lastError = null;
-      return _currentController;
+      print('VideoService: Controller created successfully');
+      return _chewieController;
     } catch (e) {
       _lastError = 'Failed to create video controller: ${e.toString()}';
+      print('VideoService: Failed to create controller: $e');
       await disposeController();
       return null;
     }
   }
 
-  /// Dispose current video controller
   Future<void> disposeController() async {
     try {
-      if (_currentController != null) {
-        await _currentController!.dispose();
-        _currentController = null;
+      if (_chewieController != null) {
+        print('VideoService: Disposing Chewie controller');
+        _chewieController!.pause();
+        _chewieController!.dispose();
+        _chewieController = null;
+      }
+      if (_videoPlayerController != null) {
+        print('VideoService: Disposing VideoPlayer controller');
+        if (_videoPlayerController!.value.isPlaying) {
+          await _videoPlayerController!.pause();
+        }
+        await _videoPlayerController!.dispose();
+        // Add a small delay to ensure native resources are released
+        await Future.delayed(Duration(milliseconds: 300));
+        print('VideoService: Controller disposed successfully');
       }
     } catch (e) {
       _lastError = 'Error disposing controller: ${e.toString()}';
+      print('VideoService: Error disposing controller: $e');
+    } finally {
+      _videoPlayerController = null;
+      _chewieController = null;
     }
   }
 
-  /// Play video with restrictions
   Future<bool> play() async {
     try {
-      if (_currentController == null ||
-          !_currentController!.value.isInitialized) {
-        throw Exception('Video controller not initialized');
+      if (_chewieController == null || !_chewieController!.isPlaying) {
+        _chewieController?.play();
+        print('VideoService: Playback started');
+        return true;
       }
-
-      await _currentController!.play();
-      return true;
+      return false;
     } catch (e) {
       _lastError = 'Failed to play video: ${e.toString()}';
+      print('VideoService: Failed to play video: $e');
       return false;
     }
   }
 
-  /// Pause video
   Future<bool> pause() async {
     try {
-      if (_currentController == null ||
-          !_currentController!.value.isInitialized) {
-        throw Exception('Video controller not initialized');
+      if (_chewieController == null || _chewieController!.isPlaying) {
+        _chewieController?.pause();
+        print('VideoService: Playback paused');
+        return true;
       }
-
-      await _currentController!.pause();
-      return true;
+      return false;
     } catch (e) {
       _lastError = 'Failed to pause video: ${e.toString()}';
+      print('VideoService: Failed to pause video: $e');
       return false;
     }
   }
 
-  /// Seek to position with restrictions
   Future<bool> seekTo(Duration position) async {
     try {
-      if (_currentController == null ||
-          !_currentController!.value.isInitialized) {
+      if (_videoPlayerController == null ||
+          !_videoPlayerController!.value.isInitialized) {
         throw Exception('Video controller not initialized');
       }
-
-      final duration = _currentController!.value.duration;
-
-      // Clamp position to valid range
+      final duration = _videoPlayerController!.value.duration;
       Duration clampedPosition = position;
       if (position < Duration.zero) {
         clampedPosition = Duration.zero;
       } else if (position > duration) {
         clampedPosition = duration;
       }
-
-      await _currentController!.seekTo(clampedPosition);
+      await _videoPlayerController!.seekTo(clampedPosition);
+      print('VideoService: Seek to $clampedPosition');
       return true;
     } catch (e) {
       _lastError = 'Failed to seek: ${e.toString()}';
+      print('VideoService: Failed to seek: $e');
       return false;
     }
   }
 
-  /// Set playback speed with restrictions
   Future<bool> setPlaybackSpeed(double speed) async {
     try {
-      if (_currentController == null ||
-          !_currentController!.value.isInitialized) {
+      if (_videoPlayerController == null ||
+          !_videoPlayerController!.value.isInitialized) {
         throw Exception('Video controller not initialized');
       }
-
-      // Apply restrictions if enabled
       double finalSpeed = speed;
       if (_restrictionsEnabled) {
         if (speed > _maxPlaybackSpeed) {
           finalSpeed = _maxPlaybackSpeed;
         } else if (speed < 0.25) {
-          finalSpeed = 0.25; // Minimum speed
+          finalSpeed = 0.25;
         }
       }
-
-      await _currentController!.setPlaybackSpeed(finalSpeed);
+      await _videoPlayerController!.setPlaybackSpeed(finalSpeed);
+      print('VideoService: Playback speed set to $finalSpeed');
       return true;
     } catch (e) {
       _lastError = 'Failed to set playback speed: ${e.toString()}';
+      print('VideoService: Failed to set playback speed: $e');
       return false;
     }
   }
 
-  /// Set volume
   Future<bool> setVolume(double volume) async {
     try {
-      if (_currentController == null ||
-          !_currentController!.value.isInitialized) {
+      if (_videoPlayerController == null ||
+          !_videoPlayerController!.value.isInitialized) {
         throw Exception('Video controller not initialized');
       }
-
-      // Clamp volume to valid range
       double clampedVolume = volume.clamp(0.0, 1.0);
-
-      await _currentController!.setVolume(clampedVolume);
+      await _videoPlayerController!.setVolume(clampedVolume);
+      print('VideoService: Volume set to $clampedVolume');
       return true;
     } catch (e) {
       _lastError = 'Failed to set volume: ${e.toString()}';
+      print('VideoService: Failed to set volume: $e');
       return false;
     }
   }
 
-  /// Rewind with restrictions
   Future<bool> rewind({int seconds = 10}) async {
     try {
-      if (_currentController == null ||
-          !_currentController!.value.isInitialized) {
+      if (_videoPlayerController == null ||
+          !_videoPlayerController!.value.isInitialized) {
         throw Exception('Video controller not initialized');
       }
-
-      // Apply restrictions if enabled
       int rewindSeconds = seconds;
       if (_restrictionsEnabled && seconds > _maxRewindSeconds) {
         rewindSeconds = _maxRewindSeconds;
       }
-
-      final currentPosition = _currentController!.value.position;
+      final currentPosition = _videoPlayerController!.value.position;
       final newPosition = currentPosition - Duration(seconds: rewindSeconds);
-
       return await seekTo(newPosition);
     } catch (e) {
       _lastError = 'Failed to rewind: ${e.toString()}';
+      print('VideoService: Failed to rewind: $e');
       return false;
     }
   }
 
-  /// Fast forward
   Future<bool> fastForward({int seconds = 10}) async {
     try {
-      if (_currentController == null ||
-          !_currentController!.value.isInitialized) {
+      if (_videoPlayerController == null ||
+          !_videoPlayerController!.value.isInitialized) {
         throw Exception('Video controller not initialized');
       }
-
-      final currentPosition = _currentController!.value.position;
+      final currentPosition = _videoPlayerController!.value.position;
       final newPosition = currentPosition + Duration(seconds: seconds);
-
       return await seekTo(newPosition);
     } catch (e) {
       _lastError = 'Failed to fast forward: ${e.toString()}';
+      print('VideoService: Failed to fast forward: $e');
       return false;
     }
   }
 
-  /// Get video information
   Map<String, dynamic> getVideoInfo() {
-    if (_currentController == null ||
-        !_currentController!.value.isInitialized) {
+    if (_videoPlayerController == null ||
+        !_videoPlayerController!.value.isInitialized) {
       return {'error': 'Video controller not initialized'};
     }
-
-    final value = _currentController!.value;
+    final value = _videoPlayerController!.value;
     return {
       'duration': value.duration.inMilliseconds,
       'position': value.position.inMilliseconds,
@@ -277,14 +282,12 @@ class VideoService {
     };
   }
 
-  /// Check if video format is supported
   static bool isSupportedFormat(String filePath) {
     final extension = filePath.toLowerCase().split('.').last;
     const supportedFormats = ['mp4', 'avi', 'mov', 'mkv', 'wmv', 'flv', 'm4v'];
     return supportedFormats.contains(extension);
   }
 
-  /// Get readable file size
   static String getReadableFileSize(int bytes) {
     if (bytes < 1024) return '$bytes B';
     if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(1)} KB';
@@ -294,20 +297,17 @@ class VideoService {
     return '${(bytes / (1024 * 1024 * 1024)).toStringAsFixed(1)} GB';
   }
 
-  /// Format duration to readable string
   static String formatDuration(Duration duration) {
     String twoDigits(int n) => n.toString().padLeft(2, '0');
     String hours = twoDigits(duration.inHours);
     String minutes = twoDigits(duration.inMinutes.remainder(60));
     String seconds = twoDigits(duration.inSeconds.remainder(60));
-
     if (duration.inHours > 0) {
       return '$hours:$minutes:$seconds';
     }
     return '$minutes:$seconds';
   }
 
-  /// Update settings and reload configuration
   Future<void> updateSettings({
     bool? restrictionsEnabled,
     double? maxPlaybackSpeed,
@@ -315,7 +315,6 @@ class VideoService {
   }) async {
     try {
       final prefs = await SharedPreferences.getInstance();
-
       if (restrictionsEnabled != null) {
         _restrictionsEnabled = restrictionsEnabled;
         await prefs.setBool(
@@ -323,44 +322,36 @@ class VideoService {
           restrictionsEnabled,
         );
       }
-
       if (maxPlaybackSpeed != null) {
         _maxPlaybackSpeed = maxPlaybackSpeed;
         await prefs.setDouble('max_playback_speed', maxPlaybackSpeed);
       }
-
       if (maxRewindSeconds != null) {
         _maxRewindSeconds = maxRewindSeconds;
         await prefs.setInt('max_rewind_seconds', maxRewindSeconds);
       }
+      print('VideoService: Settings updated');
     } catch (e) {
       _lastError = 'Failed to update settings: ${e.toString()}';
+      print('VideoService: Failed to update settings: $e');
     }
   }
 
-  /// Validate video file before playing
   Future<Map<String, dynamic>> validateVideoFile(File videoFile) async {
     try {
-      // Check if file exists
       if (!videoFile.existsSync()) {
         return {'valid': false, 'error': 'File does not exist'};
       }
-
-      // Check file size
       int fileSize = await videoFile.length();
       if (fileSize == 0) {
         return {'valid': false, 'error': 'File is empty'};
       }
-
       if (fileSize > 2 * 1024 * 1024 * 1024) {
         return {'valid': false, 'error': 'File too large (max 2GB)'};
       }
-
-      // Check file format
       if (!isSupportedFormat(videoFile.path)) {
         return {'valid': false, 'error': 'Unsupported file format'};
       }
-
       return {
         'valid': true,
         'fileSize': fileSize,
@@ -372,10 +363,21 @@ class VideoService {
     }
   }
 
-  /// Clean up resources
   Future<void> cleanup() async {
     await disposeController();
     _lastError = null;
     _isInitialized = false;
+    print('VideoService: Cleanup completed');
+  }
+
+  Future<void> reset() async {
+    print('VideoService: Resetting state');
+    await disposeController();
+    _videoPlayerController = null;
+    _chewieController = null;
+    _lastError = null;
+    _isInitialized = false;
+    await initialize(); // Reinitialize to ensure a clean state
+    print('VideoService: Reset completed');
   }
 }

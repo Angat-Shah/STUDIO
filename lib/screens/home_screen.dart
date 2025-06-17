@@ -1,4 +1,3 @@
-import 'package:flutter/material.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:permission_handler/permission_handler.dart';
@@ -7,6 +6,7 @@ import 'player_screen.dart';
 import 'settings_screen.dart';
 import 'package:video_thumbnail/video_thumbnail.dart';
 import 'dart:typed_data';
+import 'package:path_provider/path_provider.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -97,6 +97,19 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     }
   }
 
+  Future<File> copyFileToDocumentsDirectory(File originalFile) async {
+    try {
+      final directory = await getApplicationDocumentsDirectory();
+      final newPath = '${directory.path}/${originalFile.path.split('/').last}';
+      final newFile = await originalFile.copy(newPath);
+      print('Copied file to: $newPath');
+      return newFile;
+    } catch (e) {
+      print('Error copying file: $e');
+      return originalFile; // Fallback to original file if copying fails
+    }
+  }
+
   // Show error dialog with Apple-style design
   void _showErrorDialog(String message) {
     showCupertinoDialog(
@@ -118,11 +131,12 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   }
 
   // Navigate to video player
-  void _playVideo(File videoFile) {
+  Future<void> _playVideo(File videoFile) async {
+    final persistentFile = await copyFileToDocumentsDirectory(videoFile);
     Navigator.push(
       context,
       CupertinoPageRoute(
-        builder: (context) => PlayerScreen(videoFile: videoFile),
+        builder: (context) => PlayerScreen(videoFile: persistentFile),
       ),
     );
   }

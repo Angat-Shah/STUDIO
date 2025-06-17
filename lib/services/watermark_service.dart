@@ -7,7 +7,6 @@ class WatermarkService {
   factory WatermarkService() => _instance;
   WatermarkService._internal();
 
-  // Watermark configuration
   bool _isEnabled = true;
   String _username = 'User';
   double _opacity = 0.7;
@@ -15,15 +14,12 @@ class WatermarkService {
   double _fontSize = 14.0;
   WatermarkPosition _position = WatermarkPosition.topRight;
 
-  // Update timer
   Timer? _updateTimer;
   String _currentTimestamp = '';
 
-  // Stream controller for watermark updates
   final StreamController<WatermarkData> _watermarkController =
       StreamController<WatermarkData>.broadcast();
 
-  // Getters
   bool get isEnabled => _isEnabled;
   String get username => _username;
   double get opacity => _opacity;
@@ -33,28 +29,21 @@ class WatermarkService {
   String get currentTimestamp => _currentTimestamp;
   Stream<WatermarkData> get watermarkStream => _watermarkController.stream;
 
-  /// Initialize watermark service
   Future<void> initialize() async {
     await _loadSettings();
     _updateTimestamp();
     _startTimer();
   }
 
-  /// Load watermark settings from SharedPreferences
   Future<void> _loadSettings() async {
     try {
       final prefs = await SharedPreferences.getInstance();
       _isEnabled = prefs.getBool('watermark_enabled') ?? true;
-      _username = prefs.getString('watermark_username') ?? 'User';
+      _username = prefs.getString('watermark_username') ?? 'SecurePlayer';
       _opacity = prefs.getDouble('watermark_opacity') ?? 0.7;
-
-      // Load color from stored RGB values
       int colorValue = prefs.getInt('watermark_color') ?? Colors.white.value;
       _textColor = Color(colorValue);
-
       _fontSize = prefs.getDouble('watermark_font_size') ?? 14.0;
-
-      // Load position from stored index
       int positionIndex = prefs.getInt('watermark_position') ?? 1;
       _position = WatermarkPosition.values[positionIndex];
     } catch (e) {
@@ -62,7 +51,6 @@ class WatermarkService {
     }
   }
 
-  /// Start the 30-second update timer
   void _startTimer() {
     _updateTimer?.cancel();
     _updateTimer = Timer.periodic(const Duration(seconds: 30), (timer) {
@@ -71,7 +59,6 @@ class WatermarkService {
     });
   }
 
-  /// Update the current timestamp
   void _updateTimestamp() {
     final now = DateTime.now();
     _currentTimestamp =
@@ -79,7 +66,6 @@ class WatermarkService {
         '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}:${now.second.toString().padLeft(2, '0')}';
   }
 
-  /// Broadcast watermark update to listeners
   void _broadcastUpdate() {
     if (!_watermarkController.isClosed) {
       _watermarkController.add(
@@ -95,7 +81,6 @@ class WatermarkService {
     }
   }
 
-  /// Get current watermark data
   WatermarkData getCurrentWatermarkData() {
     _updateTimestamp();
     return WatermarkData(
@@ -108,7 +93,6 @@ class WatermarkService {
     );
   }
 
-  /// Update watermark settings
   Future<void> updateSettings({
     bool? enabled,
     String? username,
@@ -150,14 +134,12 @@ class WatermarkService {
         await prefs.setInt('watermark_position', position.index);
       }
 
-      // Broadcast the update immediately
       _broadcastUpdate();
     } catch (e) {
       print('Error updating watermark settings: $e');
     }
   }
 
-  /// Build watermark widget
   Widget buildWatermarkWidget(BuildContext context, Size screenSize) {
     if (!_isEnabled) return const SizedBox.shrink();
 
@@ -201,7 +183,6 @@ class WatermarkService {
     );
   }
 
-  /// Calculate top position based on watermark position
   double? _getTopPosition(WatermarkPosition position, Size screenSize) {
     switch (position) {
       case WatermarkPosition.topLeft:
@@ -215,7 +196,6 @@ class WatermarkService {
     }
   }
 
-  /// Calculate bottom position based on watermark position
   double? _getBottomPosition(WatermarkPosition position, Size screenSize) {
     switch (position) {
       case WatermarkPosition.bottomLeft:
@@ -227,7 +207,6 @@ class WatermarkService {
     }
   }
 
-  /// Calculate left position based on watermark position
   double? _getLeftPosition(WatermarkPosition position, Size screenSize) {
     switch (position) {
       case WatermarkPosition.topLeft:
@@ -242,7 +221,6 @@ class WatermarkService {
     }
   }
 
-  /// Calculate right position based on watermark position
   double? _getRightPosition(WatermarkPosition position, Size screenSize) {
     switch (position) {
       case WatermarkPosition.topRight:
@@ -253,15 +231,16 @@ class WatermarkService {
     }
   }
 
-  /// Dispose resources
   void dispose() {
     _updateTimer?.cancel();
-    _watermarkController.close();
+    if (!_watermarkController.isClosed) {
+      _watermarkController.close();
+    }
   }
 
   String getWatermarkText() {
-    final now = DateTime.now();
-    return 'User • ${now.toString().substring(0, 19)}';
+    _updateTimestamp();
+    return '$_username • $_currentTimestamp';
   }
 
   Widget buildWatermark(BuildContext context) {
@@ -283,7 +262,6 @@ class WatermarkService {
   }
 }
 
-/// Watermark position enum
 enum WatermarkPosition {
   topLeft,
   topCenter,
@@ -294,7 +272,6 @@ enum WatermarkPosition {
   bottomRight,
 }
 
-/// Extension for watermark position display names
 extension WatermarkPositionExtension on WatermarkPosition {
   String get displayName {
     switch (this) {
@@ -316,7 +293,6 @@ extension WatermarkPositionExtension on WatermarkPosition {
   }
 }
 
-/// Watermark data class
 class WatermarkData {
   final String text;
   final double opacity;
